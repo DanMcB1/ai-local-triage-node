@@ -1,0 +1,5 @@
+# Optional local-model extra. CI does not install this, and tests do not need it.
+# The CPU wheel index avoids compiling llama.cpp (no C++ toolchain required).
+# If a wheel is not available for your platform, pip will try to build from source.
+--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+llama-cpp-python>=0.3.0
