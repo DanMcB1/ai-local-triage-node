@@ -1,5 +1,7 @@
 # Local Quantized Triage Node
 
+**Portfolio project #8 of 12** from [@suraj_sharma14's FDE project list](https://x.com/suraj_sharma14/status/2125197762752806998).
+
 A small, local demo of an **offline triage node**: a first look at incoming dealership messages and documents *before* they go anywhere else. It screens each message for personal data, then classifies category, urgency, and the desk that should see it — sales, service, F&I, legal, billing, or the BDC.
 
 This is a **portfolio demo**, not production software and not a certified DLP or air-gap product. Detection is regex plus checksums, not a commercial DLP engine. The optional language model is a **1.5B parameter Q4 GGUF** that runs on this machine's **CPU**. In production this node would typically use **one GPU**. Sample messages belong to the fictional **Lakeside Auto Group (sample)**. Tests and CI run without the model.
@@ -104,6 +106,31 @@ python -m unittest discover -s tests
 
 The suite covers Luhn / ABA / VIN checks, the "bare 9-digit number is not an SSN" rule, rules classifications, hybrid fallback when the model is missing, the labeled-set scorecard, and the network guard (including "triage still works while outbound sockets are refused"). CI installs only `requirements.txt` and does not download the GGUF.
 
+## Project layout
+
+```
+ai-local-triage-node/
+  app.py                 Streamlit UI
+  run.sh                 One-command launcher
+  download_model.sh      Fetches the optional Q4 GGUF (gitignored)
+  requirements.txt       streamlit, pandas
+  requirements-llm.txt   llama-cpp-python (optional, for the local model)
+  README.md
+  LICENSE                MIT, Copyright (c) 2026 Daniel McBrearty
+  DEMO_SCRIPT.md         ~1-minute talk track for interviews
+  triage/                PII checks, rules, hybrid engine, network guard, sample inbox
+  examples/              Saved eval reports
+  screenshots/           App screenshot (if present)
+  tests/                 Checksums, rules, hybrid fallback, scorecard, network guard
+  models/                Downloaded GGUF (gitignored)
+```
+
+## For interviewers
+
+If you only have a minute, start the app on the Inbox tab with the sample **fi-credit-app**, point at the masked SSN, card, and VIN, then open **Offline proof** and show that a call to Hugging Face is refused while a stranded-car text still triages locally. The talk track is in [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md).
+
+Daniel's background is car sales, F&I, and auto software sales (Dealr.cloud), not professional software engineering. This project is meant to show he can talk about **keeping a deal jacket on the lot** — screen for personal data with checksums, classify the message, and prove the box does not need the public internet — and that he is honest about what a demo does not prove.
+
 ## License
 
-MIT. Copyright (c) 2026 Daniel McBrearty.
+This project is released under the [MIT License](LICENSE). Copyright (c) 2026 Daniel McBrearty.
