@@ -91,13 +91,17 @@ _VIN_WEIGHTS = (8, 7, 6, 5, 4, 3, 2, 10, 0, 9, 8, 7, 6, 5, 4, 3, 2)
 
 
 def vin_ok(vin: str) -> bool:
-    """Return True if a 17-character VIN has a valid ISO 3779 check digit."""
+    """Return True if a VIN has a letter, no I/O/Q, and a valid ISO 3779 check digit."""
     vin = re.sub(r"[\s-]+", "", vin).upper()
     if len(vin) != 17:
         return False
     if any(ch in "IOQ" for ch in vin):
         return False
     if any(ch not in _VIN_MAP for ch in vin):
+        return False
+    # Real VINs always contain letters. A 17-digit numeric run is not a VIN
+    # even if the ISO 3779 check digit happens to pass (for example, all nines).
+    if not any(ch.isalpha() for ch in vin):
         return False
     total = 0
     for i, ch in enumerate(vin):
@@ -147,28 +151,61 @@ def _ssns(text: str) -> list[Finding]:
     return out
 
 
-def _cards(text: str) -> list[Finding]:
-    out: list[Finding] = []
-    # 13–19 digits, optional spaces or dashes in groups.
-    pattern = re.compile(
-        r"(?<!\d)(\d(?:[ -]?\d){12,18})(?!\d)"
-    )
-    for match in pattern.finditer(text):
+# 13–19 digits, optional spaces or dashes in groups. Shared by the card
+# detector and by the phone / account rules, which must not consume a
+# card-length run.
+_CARD_RUN = re.compile(r"(?<!\d)(\d(?:[ -]?\d){12,18})(?!\d)")
+
+# A label immediately before the digits. A mistyped check digit should still
+# be treated as a card when the text already calls it one.
+_CARD_LABEL = re.compile(
+    r"(?i)"
+    r"(?:"
+    r"\b(?:credit|debit)?\s*cards?(?:\s*(?:number|no\.?|#))?"
+    r"|\bcc(?:\s*(?:number|no\.?|#))?"
+    r"|\bpan\b"
+    r"|\bprimary\s*account\s*number"
+    r")"
+    r"\s*[:#]?\s*$"
+)
+
+
+def _card_runs(text: str) -> list[tuple[int, int, str, str]]:
+    """Return (start, end, raw, digits) for each 13–19 digit card-length run."""
+    out: list[tuple[int, int, str, str]] = []
+    for match in _CARD_RUN.finditer(text):
         raw = match.group(1)
         digits = re.sub(r"\D", "", raw)
-        # Skip things that look like a formatted SSN or a 9-digit id.
-        if len(digits) < 13:
-            continue
-        if not luhn_ok(digits):
+        if 13 <= len(digits) <= 19:
+            out.append((match.start(1), match.end(1), raw, digits))
+    return out
+
+
+def _preceded_by_card_label(text: str, start: int) -> bool:
+    prefix = text[max(0, start - 48) : start]
+    return _CARD_LABEL.search(prefix) is not None
+
+
+def _cards(text: str) -> list[Finding]:
+    out: list[Finding] = []
+    for start, end, raw, digits in _card_runs(text):
+        # Luhn-valid PANs are always cards. A run that fails Luhn is still a
+        # card when a label makes the intent clear, so a typo is masked
+        # instead of leaking.
+        if luhn_ok(digits):
+            check = "luhn"
+        elif _preceded_by_card_label(text, start):
+            check = "labeled"
+        else:
             continue
         out.append(
             Finding(
                 pii_type="credit_card",
                 value=raw,
-                start=match.start(1),
-                end=match.end(1),
+                start=start,
+                end=end,
                 normalized=digits,
-                check="luhn",
+                check=check,
             )
         )
     return out
@@ -176,6 +213,7 @@ def _cards(text: str) -> list[Finding]:
 
 def _phones(text: str) -> list[Finding]:
     out: list[Finding] = []
+    card_runs = _card_runs(text)
     pattern = re.compile(
         r"(?<!\d)(?:\+?1[\s.-]*)?(?:\(?\d{3}\)?[\s.-]*)\d{3}[\s.-]*\d{4}(?!\d)"
     )
@@ -191,6 +229,10 @@ def _phones(text: str) -> list[Finding]:
         # Avoid treating long numeric ids as phones; require a separator
         # or parentheses so a bare 10-digit stock number is not flagged.
         if not re.search(r"[()\s.-]", raw):
+            continue
+        # A 13–19 digit run is card-length, even when Luhn fails. Do not
+        # tag a prefix of that run as a phone.
+        if any(match.start() < e and s < match.end() for s, e, _, _ in card_runs):
             continue
         out.append(
             Finding(
@@ -275,6 +317,12 @@ def _accounts(text: str) -> list[Finding]:
         r"(\d{6,17})\b"
     )
     for match in pattern.finditer(text):
+        raw = match.group(1)
+        digits = re.sub(r"\D", "", raw)
+        # 13–19 digit runs are card-length, so they are not bank accounts
+        # even when a nearby word is "account".
+        if 13 <= len(digits) <= 19:
+            continue
         out.append(_finding("bank_account", match, check="labeled"))
     return out
 

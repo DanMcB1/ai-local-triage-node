@@ -59,7 +59,7 @@ Useful one-liners, once the virtualenv exists:
 
 ## How it works
 
-1. **Detect PII.** `triage/pii.py` is regex plus checksums. Formatted SSNs are flagged; a bare 9-digit stock number is not, unless it is labeled `SSN:`. Cards must pass Luhn. Routing numbers must pass the ABA weights. VINs must pass the ISO 3779 check digit. Names, driver's licenses, dates of birth, and bank accounts are labeled heuristics. This will miss some values. That limitation is documented on purpose.
+1. **Detect PII.** `triage/pii.py` is regex plus checksums. Formatted SSNs are flagged; a bare 9-digit stock number is not, unless it is labeled `SSN:`. Cards must pass Luhn, or sit next to a card label so a mistyped check digit is still masked. A 13–19 digit run is never tagged as a phone or bank account. Routing numbers must pass the ABA weights. VINs must pass the ISO 3779 check digit and contain at least one letter (a 17-digit numeric run is not a VIN, even if the check digit happens to pass). Names, driver's licenses, dates of birth, and bank accounts are labeled heuristics. This will miss some values. That limitation is documented on purpose.
 2. **Mask.** Findings are replaced with tokens such as `[SSN]` and `[CREDIT_CARD]` before the local model sees the text.
 3. **Classify.** Rules in `triage/rules.py` score department keywords and urgency patterns. They are deterministic and are what CI runs.
 4. **Hybrid.** If the rules are confident, they stand. If two departments both score strongly, or the winner is weak, the local GGUF is asked for a JSON decision (constrained by a grammar). If the model is missing or fails, the engine falls back to rules.

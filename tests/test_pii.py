@@ -32,6 +32,11 @@ class VinAndAbaTests(unittest.TestCase):
     def test_letters_ioq_rejected(self) -> None:
         self.assertFalse(vin_ok("1LKSDM26IMCB00001"))
 
+    def test_all_numeric_run_is_not_a_vin(self) -> None:
+        # All nines passes the ISO 3779 check digit but is not a real VIN.
+        self.assertFalse(vin_ok("99999999999999999"))
+        self.assertTrue(vin_ok("1HGCM82633A004352"))
+
     def test_aba_known_samples(self) -> None:
         self.assertTrue(aba_routing_ok("267084005"))
         self.assertTrue(aba_routing_ok("021000021"))
@@ -52,6 +57,17 @@ class DetectTests(unittest.TestCase):
     def test_luhn_failure_is_not_a_card(self) -> None:
         text = "The typo card was 4111-1111-1111-1112."
         self.assertFalse(any(f.pii_type == "credit_card" for f in detect(text)))
+
+    def test_labeled_failed_luhn_is_still_a_card(self) -> None:
+        # Same rule as the PII unmasking proxy: a label makes the typo a card,
+        # so it is masked instead of leaking.
+        text = "card: 4111 1111 1111 1112"
+        findings = detect(text)
+        self.assertEqual([f.pii_type for f in findings], ["credit_card"])
+        self.assertEqual(findings[0].value, "4111 1111 1111 1112")
+        self.assertEqual(findings[0].check, "labeled")
+        self.assertEqual(mask(text), "card: [CREDIT_CARD]")
+        self.assertNotIn("4111", mask(text))
 
     def test_valid_card_is_found(self) -> None:
         text = "Deposit on Visa 4111-1111-1111-1111."
@@ -82,6 +98,34 @@ class DetectTests(unittest.TestCase):
     def test_invalid_vin_not_flagged(self) -> None:
         text = "Is VIN 1HGCV2F36KA123456 on the lot?"
         self.assertFalse(any(f.pii_type == "vin" for f in detect(text)))
+
+    def test_numeric_17_digit_run_is_not_a_vin(self) -> None:
+        nines = "99999999999999999"
+        unlabeled = f"The reference number is {nines} today"
+        types = {f.pii_type for f in detect(unlabeled)}
+        self.assertNotIn("vin", types)
+        self.assertNotIn("phone", types)
+        self.assertNotIn("bank_account", types)
+        self.assertNotIn("credit_card", types)
+
+        real = "VIN 1HGCM82633A004352 is on the lot"
+        vins = [f.value for f in detect(real) if f.pii_type == "vin"]
+        self.assertEqual(vins, ["1HGCM82633A004352"])
+
+        # Luhn-valid 17-digit numeric runs are cards, not VINs.
+        luhn_ok_17 = "99999999999999996"
+        findings = detect(f"Charge {luhn_ok_17} today")
+        self.assertEqual([f.pii_type for f in findings], ["credit_card"])
+
+        # After a card label, a 17-digit run that fails Luhn is still a card.
+        labeled = f"Card number {nines} for a deposit"
+        findings = detect(labeled)
+        self.assertEqual([f.pii_type for f in findings], ["credit_card"])
+        self.assertEqual(mask(labeled), "Card number [CREDIT_CARD] for a deposit")
+
+        # After an account label, the same failed-Luhn run stays untagged.
+        account = f"Account number: {nines}"
+        self.assertEqual(detect(account), [])
 
     def test_invalid_routing_not_flagged(self) -> None:
         text = "Routing number: 267084006"
